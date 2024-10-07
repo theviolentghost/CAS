@@ -5,8 +5,9 @@ const {Node, Constant, Variable, Function, Operator} = require("./node.js");
 //let b = new Variable("x", undefined, new Variable("x", undefined, Variable.X));
 // let d = new Operator("+", new Variable("x", Constant.ONE, new Constant(2)), new Variable("x", Constant.ONE, new Constant(2)));
 // console.log(d.simplify().toString())
+//let e = new Operator("/", Variable.X, new Variable("x", Constant.ONE, new Constant(2)))
 
-//console.log(b.derivative().toString());
+//console.log(e.derivative().toString());
 //console.log(c.fraction().display);
 
 //console.log(new Variable("x", undefined, new Constant(2)).power(new Constant(2)));
@@ -29,7 +30,7 @@ class Crawler {
 
         switch (node.type) {
             case "operator":
-                this.crawlOperator(node);
+                this.crawlOperator(node, oppositeOperator);
                 break;
             case "constant":
             case "variable":
@@ -42,9 +43,9 @@ class Crawler {
         }
     }
 
-    crawlOperator(node) {
+    crawlOperator(node, oppositeOperator = false) {
         // Set operator if not set
-        if (!this.operator) this.operator = node.operator;
+        if (!this.operator) this.assignOperatorFromNode(node);
 
         if (this.isCompatibleOperator(node.operator)) {
             // Compatible operator - crawl both sides
@@ -53,16 +54,21 @@ class Crawler {
         } else {
             // Incompatible operator - treat whole subtree as a term
             const crawler = new Crawler(node);
-            this.terms.push(crawler);
+            
+            if(!oppositeOperator) this.terms.push(crawler);
+            else this.oppositeTerms.push(crawler);
+
             this.childrenCrawlers.push(crawler);
         }
     }
 
-    compatibleMap = [
-        ["+", "-"],
-        ["*", "/"],
-        ["^"] //havnt implement this case fully
-    ]
+    get compatibleMap() {
+        return [
+            ["+", "-"],
+            ["*", "/"],
+            ["^", "###"] //havnt implement this case fully
+        ];
+    } 
 
     isOppositeOperation(operator) {
         if (!operator) return false;
@@ -72,6 +78,23 @@ class Crawler {
         });
     }
 
+    assignOperatorFromNode(node) {
+        let operatorToSet = null;
+        let oppositeOperatorToSet = null;
+
+        for (let i = 0; i < this.compatibleMap.length; i++) {
+            // Check if the operator is in the current group
+            if (this.compatibleMap[i].includes(node.operator)) {
+                // Return the first index of the group
+                operatorToSet = this.compatibleMap[i][0];
+                oppositeOperatorToSet = this.compatibleMap[i][1];
+            }
+        }
+
+        this.operator = operatorToSet;
+        this.oppositeOperator = oppositeOperatorToSet;
+    }
+
     isCompatibleOperator(operator) {
         if (!this.operator) return true;
         if (!this.compatibleMap.flat().includes(operator)) return true;
@@ -79,6 +102,19 @@ class Crawler {
         return this.compatibleMap.some(group => 
             group.includes(this.operator) && group.includes(operator)
         );
+    }
+    convertToTerm() {
+        //used as term key
+        let termsString = this.terms.map((term) => term.toString()).join(this.operator)
+        let oppositeTermsString = this.oppositeTerms.map((term) => term.toString()).join(this.operator);
+
+        return `${termsString}${this.oppositeOperator}${oppositeTermsString}`;
+    }
+    reduce() {
+
+    }
+    combineTerms(node1, node2) {
+
     }
 }
 
@@ -253,26 +289,31 @@ class Tree {
                (open === '{' && close === '}');
     }
 
-    reduce(node) {
+    reduce(node, allowDistributing = true) {
         if(!node) return;
 
         if(Node.isOperator(node)) {
             node._left = this.reduce(node.left);
             node._right = this.reduce(node.right);
 
+            const isOneOperandAnOperator = Node.isOperator(node.left) || Node.isOperator(node.right);
+
             switch(node.operator) {
                 case "+": 
                     if(node.left.isZero()) return node.right;
                     if(node.right.isZero()) return node.left;
+                    if(!allowDistributing && isOneOperandAnOperator) return node; //prevents distributing
                     return node.left.add(node.right); //attempt to combine
                 case "-":
                     if(node.left.isZero()) return node.right.multiply(Constant.NEGATIVE);
                     if(node.right.isZero()) return node.left;
+                    if(!allowDistributing && isOneOperandAnOperator) return node; //prevents distributing
                     return node.left.subtract(node.right);
                 case "*":
                     if(node.left.isZero() || node.right.isZero()) return Constant.ZERO;
                     if(node.left.isOne()) return node.right;
                     if(node.right.isOne()) return node.left;
+                    if(!allowDistributing && isOneOperandAnOperator) return node; //prevents distributing
                     return node.left.multiply(node.right);
                 case "/":
                     if(node.left.isZero()) return Constant.ZERO;
@@ -281,6 +322,7 @@ class Tree {
                         return Constant.ZERO;
                     }
                     if(node.right.isOne()) return node.left;
+                    if(!allowDistributing && isOneOperandAnOperator) return node; //prevents distributing
                     return node.left.divide(node.right);
                 case "^":
                     if(node.right.isZero()) return Constant.ONE;
@@ -293,23 +335,25 @@ class Tree {
     }
 
     simplify(root = this.root) {
-        const reducedRoot = this.reduce(root);
+        const reducedRoot = this.reduce(root, false);
         console.log(reducedRoot);
 
         const crawler = new Crawler(reducedRoot);
 
         console.log(crawler);
 
-        while(true) {
-            let a;
-        }
-
-        return null;
+        return reducedRoot;
     }
 
     distribute() {
         
         return this;
+    }
+
+    derivative() {
+        return this.simplify(
+            this.simplify().derivative()
+        );
     }
 }
 
@@ -401,10 +445,9 @@ class Expression {
     }
     tokenize() {
         const tokens = [];
-        let current = '';
         let i = 0;
 
-        const isDigit = (char) => /[0-9.]/.test(char);
+        const isDigit = (char) => /[0-9]/.test(char);
         const isLetter = (char) => /[a-zA-Z]/.test(char);
         const isOperator = (char) => /[\+\-\*\/\^]/.test(char);
         const isBracket = (char) => /[\(\)\[\]\{\}]/.test(char);
@@ -412,41 +455,66 @@ class Expression {
         while (i < this.expression.length) {
             let char = this.expression[i];
 
+            // Skip whitespace
+            if (/\s/.test(char)) {
+                i++;
+                continue;
+            }
+
             // Handle numbers (including decimals)
             if (isDigit(char)) {
-                current = '';
-                while (i < this.expression.length && isDigit(this.expression[i])) {
-                    current += this.expression[i];
+                let number = '';
+                while (i < this.expression.length && (isDigit(this.expression[i]) || this.expression[i] === '.')) {
+                    number += this.expression[i];
                     i++;
                 }
+                
                 tokens.push({
                     type: 'number',
-                    value: parseFloat(current)
+                    value: parseFloat(number)
                 });
+
+                // Check for implicit multiplication
+                if (i < this.expression.length && (isLetter(this.expression[i]) || this.expression[i] === '(')) {
+                    tokens.push({
+                        type: 'operator',
+                        value: '*'
+                    });
+                }
                 continue;
             }
 
             // Handle variables and functions
             if (isLetter(char)) {
-                current = '';
+                let name = '';
                 while (i < this.expression.length && isLetter(this.expression[i])) {
-                    current += this.expression[i];
+                    name += this.expression[i];
                     i++;
                 }
+
                 // Check if it's a function or variable
                 tokens.push({
-                    type: this.functions.includes(current.toLowerCase()) ? 'function' : 'variable',
-                    value: current
+                    type: this.functions.includes(name.toLowerCase()) ? 'function' : 'variable',
+                    value: name
                 });
+
+                // Add implicit multiplication if followed by another variable or number
+                if (i < this.expression.length && (isDigit(this.expression[i]) || isLetter(this.expression[i]))) {
+                    tokens.push({
+                        type: 'operator',
+                        value: '*'
+                    });
+                }
                 continue;
             }
 
             // Handle operators
             if (isOperator(char)) {
-                // Handle unary operators
+                // Handle unary minus
                 if (char === '-' && (tokens.length === 0 || 
                     tokens[tokens.length - 1].type === 'operator' || 
-                    tokens[tokens.length - 1].value === '(')) {
+                    (tokens[tokens.length - 1].type === 'bracket' && 
+                     ['(', '[', '{'].includes(tokens[tokens.length - 1].value)))) {
                     tokens.push({
                         type: 'number',
                         value: -1
@@ -471,11 +539,20 @@ class Expression {
                     type: 'bracket',
                     value: char
                 });
+                
+                // Add implicit multiplication after closing bracket if followed by variable or number
+                if (char === ')' && i + 1 < this.expression.length && 
+                    (isDigit(this.expression[i + 1]) || isLetter(this.expression[i + 1]))) {
+                    tokens.push({
+                        type: 'operator',
+                        value: '*'
+                    });
+                }
                 i++;
                 continue;
             }
 
-            // Handle commas (for function arguments)
+            // Handle commas
             if (char === ',') {
                 tokens.push({
                     type: 'separator',
@@ -485,23 +562,20 @@ class Expression {
                 continue;
             }
 
-            // Skip whitespace
-            if (/\s/.test(char)) {
-                i++;
-                continue;
-            }
-
-            // Invalid character
             throw new Error(`Invalid character found: ${char}`);
         }
 
         return tokens;
     }
+    
     log() {
         console.log(this.expression);
     }
     simplify() {
         this.tree.simplify();
+    }
+    derivative() {
+        return this.tree.derivative();
     }
 }
 

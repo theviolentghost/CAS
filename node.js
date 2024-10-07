@@ -396,7 +396,7 @@ class Operator extends Node {
             case "*":
                 return this.productDerivative();
             case "/":
-                return this.quotientDerivative();
+                return this.logarithmicDerivative();
             case "^":
                 //logrithmric
         }
@@ -408,19 +408,38 @@ class Operator extends Node {
         return this;
     }
     productDerivative() {
+        // Product rule: (u*v)' = u'v + uv'
         return new Operator("+",
             new Operator("*", this.left, this.right.derivative()),
             new Operator("*", this.left.derivative(), this.right)
         );
     }
-    quotientDerivative() {
-        return new Operator("/",
-            new Operator("-", 
-                new Operator("*", this.right, this.left.derivative()),
-                new Operator("*", this.left, this.right.derivative())
+    logarithmicDerivative() {
+        // rule of logs 
+        // y = x / x^2
+        // ln(y) = ln(x) - ln(x^2)
+        // 1/y*dydx = 1/x - 1/x^2 * 2x
+        // dydx = x / x^2 (1/x - 2x/x^2 )
+        // (u/v) = u / v (d[ln(u)] - d[ln(v)])
+        // (u/z) = d[ln(u)] * u / v - d[ln(v)] * u / v
+        let derivative = new Operator("-",
+            new Operator("*", 
+                new Function("ln", this.left).derivative(),
+                new Operator("/", 
+                    this.left,
+                    this.right
+                )
             ),
-            new Operator("^", this.right, new Constant(2))
-        )
+            new Operator("*", 
+                new Function("ln", this.right).derivative(),
+                new Operator("/", 
+                    this.left,
+                    this.right
+                )
+            ),
+        );
+
+        return derivative;
     }
     add(node) {
         if (!node) return this;
@@ -488,8 +507,13 @@ class Operator extends Node {
         "function": 3,
         "operator": 4
     }
-    order() {
+    nonOrderableOperators = ["/", "^"];
+    preventOrder() {
+        return this.nonOrderableOperators.includes(this.operator);
+    }
+    order(force = false) {
         //orders the function so no matter what orientation the toString method will be the same
+        if(!force && this.preventOrder()) return
         if(Operator.canCombine(this.operator, this.left, this.right)) return;
         
         let leftPrecedence = this.nodePrecedence[this.left?.type?.toLowerCase()] || 0;

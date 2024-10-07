@@ -1,3 +1,9 @@
 const { Expression } = require("./CAS.js");
 
-const expression = new Expression("5 + 4*x^2 + x^2 + 5");
+const expression = new Expression("(x^2 + 1) / (x^2 + 1)");
+expression.simplify();
+//expression.derivative();
+
+while(true) {
+    let a;
+}
