@@ -14,6 +14,7 @@ const {Node, Constant, Variable, Function, Operator} = require("./node.js");
 
 //goes through grabbing terms to "simplify them"
 class Crawler {
+    type = "crawler";
     terms = [];
     oppositeTerms = [];
     operator = null;
@@ -64,9 +65,9 @@ class Crawler {
 
     get compatibleMap() {
         return [
-            ["+", "-"],
-            ["*", "/"],
-            ["^", "###"] //havnt implement this case fully
+            ["+", "-", Constant.ZERO], //index #2 is what is retunred on cancel, ex: x / x = 1;
+            ["*", "/", Constant.ONE],
+            ["^", "###", Constant.ONE] //havnt implement this case fully
         ];
     } 
 
@@ -105,16 +106,91 @@ class Crawler {
     }
     convertToTerm() {
         //used as term key
-        let termsString = this.terms.map((term) => term.toString()).join(this.operator)
+        let termsString = this.terms.map((term) => term.toString()).join(this.operator);
+
+        if(this.oppositeTerms.length === 0) return `${termsString}`;
+
         let oppositeTermsString = this.oppositeTerms.map((term) => term.toString()).join(this.operator);
 
         return `${termsString}${this.oppositeOperator}${oppositeTermsString}`;
     }
-    reduce() {
-
+    toString() {
+        return this.convertToTerm();
     }
-    combineTerms(node1, node2) {
+    orderTerms() {
+        //order them so if identical crawler exists their termKey will be identical
+        //use operator.orderTemrs();
+        this.terms.sort((a,b) => {
+            if(a.type === "crawler") a.orderTerms();
+            if(b.type === "crawler") b.orderTerms();
+            return Operator.orderTerms(a,b)
+        });
+        this.oppositeTerms.sort((a,b) => {
+            if(a.type === "crawler") a.orderTerms();
+            if(b.type === "crawler") b.orderTerms();
+            return Operator.orderTerms(a,b)
+        });
+    }
+    reduce() {
+        //sorts terms
+        this.orderTerms();
+        //reduces all sub instances of crawlers
+        for(let crawler of this.childrenCrawlers) {
+            crawler.reduce();
+        }
 
+        //termification and simplification
+        const termified = {
+            terms: this.terms.map((node) => node.toString()),
+            inverse: this.oppositeTerms.map((node) => node.toString())
+        }
+
+        for(let n = 0; n < termified.terms.length; n++) {
+            for(let m = 0; m < termified.inverse.length; m++) {
+                if(termified.terms[n] === termified.inverse[m]) {
+                    this.oppositeTerms.splice(m,1);
+                    termified.terms.splice(n,1);
+                    termified.inverse.splice(m,1);
+                    this.terms[n] = this.compatibleMap.filter(group => {
+                        return this.operator === group?.[0] || this.operator === group?.[1]
+                    })[0][2]; //replaces term with appropriate simplified term
+                    m--;
+                    n--;
+                }
+            }
+        }
+          
+        //combines any like terms
+        for(let t = 0; t < this.terms.length; t++) {
+            //not minus one to check against opposite terms
+            let term = this.terms[t];
+
+            for(let i = 0; i < this.oppositeTerms.length; i++) {
+                let oppositeTerm = this.oppositeTerms[i];
+                if(Operator.canCombine(this.operator,term,oppositeTerm)) {
+                    this.terms.splice(t+1, 1);
+                    this.terms[t] = new Operator(this.oppositeOperator, term, oppositeTerm).simplify();
+                    this.oppositeTerms.splice(i--,1);
+                }
+            }
+
+            if(!(t < this.terms.length - 1)) break; //stop errors
+
+            let nextTerm = this.terms[t+1];
+
+            if(Operator.canCombine(this.operator,term,nextTerm)) {
+                this.terms.splice(t+1, 1);
+                this.terms[t--] = new Operator(this.operator, term, nextTerm).simplify();
+            }
+        }
+        for(let t = 0; t < this.oppositeTerms.length - 1; t++) {
+            let term = this.oppositeTerms[t];
+            let nextTerm = this.oppositeTerms[t+1];
+            if(Operator.canCombine(this.operator,term,nextTerm)) {
+                this.oppositeTerms.splice(t+1, 1);
+                this.oppositeTerms[t--] = new Operator(this.operator, term, nextTerm).simplify();
+            }
+        }
     }
 }
 
@@ -293,8 +369,8 @@ class Tree {
         if(!node) return;
 
         if(Node.isOperator(node)) {
-            node._left = this.reduce(node.left);
-            node._right = this.reduce(node.right);
+            node._left = this.reduce(node.left, allowDistributing);
+            node._right = this.reduce(node.right, allowDistributing);
 
             const isOneOperandAnOperator = Node.isOperator(node.left) || Node.isOperator(node.right);
 
@@ -325,7 +401,7 @@ class Tree {
                     if(!allowDistributing && isOneOperandAnOperator) return node; //prevents distributing
                     return node.left.divide(node.right);
                 case "^":
-                    if(node.right.isZero()) return Constant.ONE;
+                    if(node.right.isZero()) return node.left.coefficient || Constant.ONE;
                     if(node.right.isOne()) return node.left;
                     return node.left.power(node.right);
             }
@@ -336,13 +412,19 @@ class Tree {
 
     simplify(root = this.root) {
         const reducedRoot = this.reduce(root, false);
-        console.log(reducedRoot);
+        //console.log(reducedRoot);
 
         const crawler = new Crawler(reducedRoot);
+        crawler.reduce();
 
-        console.log(crawler);
+        //console.log(crawler);
 
-        return reducedRoot;
+        return {
+            root: reducedRoot,
+            crawler,
+            //expression: new Expression(crawler.toString()),
+            string: crawler.toString()
+        };
     }
 
     distribute() {
@@ -352,7 +434,7 @@ class Tree {
 
     derivative() {
         return this.simplify(
-            this.simplify().derivative()
+            this.simplify().root.derivative()
         );
     }
 }
@@ -385,7 +467,8 @@ class Expression {
         if (this.isValid) {
             this.tokens = this.tokenize();
             this.tree = new Tree(this.tokens);
-        }
+        } 
+        else console.error("not valid equation", this.expression);
     }
 
     containers = [
@@ -572,9 +655,11 @@ class Expression {
         console.log(this.expression);
     }
     simplify() {
+        if (!this.isValid) return;
         this.tree.simplify();
     }
     derivative() {
+        if (!this.isValid) return;
         return this.tree.derivative();
     }
 }

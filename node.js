@@ -66,7 +66,7 @@ class Constant extends Node {
     constructor(value = 0) {
         super();
         this.value = value;
-        this.coefficient = this.value;
+        //this.coefficient = this.value;
     }
     fraction() {
         function gcd(a, b) {
@@ -177,7 +177,6 @@ class Constant extends Node {
                 return new Constant(this.value / node.value);
             case "variable":
             case "function":
-                return this.divide(node.coefficient);
             case "operator":
                 return new Operator("/", this, node); //cannot simplify
         }
@@ -308,6 +307,13 @@ class Variable extends Node {
                     );
                 }
                 return new Operator("*", this, node);
+            case "function":
+                return new Function(
+                    node.name,
+                    node.input,
+                    this.multiply(node.coefficient),
+                    node.exponent,
+                );
             default:
                 return new Operator("*", this, node);
         }
@@ -369,8 +375,8 @@ class Operator extends Node {
     }
     constructor(operator = "+", left = Constant.ZERO, right = Constant.ZERO) {
         super();
-        this.name = operator;
-        this.operator = this.name;
+        //this.name = operator;
+        this.operator = operator;
         this._left = left;
         this._right = right;
 
@@ -400,12 +406,11 @@ class Operator extends Node {
             case "^":
                 //logrithmric
         }
+        console.log(this)
         console.error("unknown symbol", this.operator);
     }
     standardDerivative() {
-        this.left.derivative();
-        this.right.derivative();
-        return this;
+        return new Operator(this.operator, this.left.derivative(), this.right.derivative());
     }
     productDerivative() {
         // Product rule: (u*v)' = u'v + uv'
@@ -484,9 +489,12 @@ class Operator extends Node {
         return new Operator("^", this, node);
     }
     simplify() {
+        if(Node.isOperator(this.left)) this.left = this.left.simplify();
+        if(Node.isOperator(this.right)) this.right = this.right.simplify();
+
         switch(this.operator) {
             //use built in node methods to simplify
-            //if node cant simplify a identical operator node will return
+            //if node cant simplify an identical operator node will return
             case "+":
                 return this.left.add(this.right);
             case "-":
@@ -501,63 +509,65 @@ class Operator extends Node {
         console.error("unknown operator:", this.operator);
         return this;
     }
-    nodePrecedence = {
+    static nodePrecedence = {
         "constant": 1,
         "variable": 2,
         "function": 3,
         "operator": 4
     }
-    nonOrderableOperators = ["/", "^"];
+    static nonOrderableOperators = ["/", "^"];
     preventOrder() {
-        return this.nonOrderableOperators.includes(this.operator);
+        return Operator.nonOrderableOperators.includes(this.operator);
     }
     order(force = false) {
         //orders the function so no matter what orientation the toString method will be the same
         if(!force && this.preventOrder()) return
-        if(Operator.canCombine(this.operator, this.left, this.right)) return;
+        //if(Operator.canCombine(this.operator, this.left, this.right)) return;
         
-        let leftPrecedence = this.nodePrecedence[this.left?.type?.toLowerCase()] || 0;
-        let rightPrecedence = this.nodePrecedence[this.right?.type?.toLowerCase()] || 0;
-
-        if(leftPrecedence == 0 && rightPrecedence == 0) return;
-
-        if(rightPrecedence > leftPrecedence) {
-            let temporary = this.right;
-            this.right = this.left;
-            this.left = temporary;
+        if(Operator.orderTerms(this.left, this.right) === -1) {
+            let temporary = this.left;
+            this.left = this.right;
+            this.right = temporary;
         }
+    }
+    static orderTerms(node1, node2) {
+        //retunr -1, 0, 1 or based on how to swap
+
+        function getStringValue(str) {
+            let totalValue = 0;
+            for (let i = 0; i < str.length; i++) {
+              totalValue += str.charCodeAt(i);  // Get the character code and add to the sum
+            }
+            return totalValue;
+        }
+
+        let leftPrecedence = Operator.nodePrecedence[node1?.type?.toLowerCase()] || 0;
+        let rightPrecedence = Operator.nodePrecedence[node2?.type?.toLowerCase()] || 0;
+
+        if(leftPrecedence == 0 && rightPrecedence == 0) return 0;
+
+        if(rightPrecedence > leftPrecedence) return -1;
         else if(leftPrecedence === rightPrecedence) {
-            if(Node.sameType(this.left, this.right) && Node.isOperator(this.left)) {
+            if(Node.sameType(node1, node2) && Node.isOperator(node1)) {
                 //operators
-                function getStringValue(str) {
-                    let totalValue = 0;
-                    for (let i = 0; i < str.length; i++) {
-                      totalValue += str.charCodeAt(i);  // Get the character code and add to the sum
-                    }
-                    return totalValue;
-                }
-                leftPrecedence = getStringValue(this.left.toString());
-                rightPrecedence = getStringValue(this.right.toString());
+                leftPrecedence = getStringValue(node1.toString());
+                rightPrecedence = getStringValue(node2.toString());
 
-                if(rightPrecedence > leftPrecedence) {
-                    let temporary = this.right;
-                    this.right = this.left;
-                    this.left = temporary;
-                }
-
-
-                return;
+                if(rightPrecedence > leftPrecedence) return -1;
+                return 0;
             }
-            const leftExponentPrecedence = this.nodePrecedence[this.left.exponent?.type?.toLowerCase()] || 0;
-            const rightExponentPrecedence = this.nodePrecedence[this.right.exponent?.type?.toLowerCase()] || 0;
+            const leftExponentPrecedence = this.nodePrecedence[node1.exponent?.type?.toLowerCase()] || 0;
+            const rightExponentPrecedence = this.nodePrecedence[node2.exponent?.type?.toLowerCase()] || 0;
 
-            if(rightExponentPrecedence > leftExponentPrecedence) {
-                let temporary = this.right;
-                this.right = this.left;
-                this.left = temporary;
-            }
-            //if equal they should be able to be combined, revisit later
+            if(rightExponentPrecedence > leftExponentPrecedence) return -1;
+            
+            leftPrecedence = getStringValue(node1.toString());
+            rightPrecedence = getStringValue(node2.toString());
+
+            if(rightPrecedence > leftPrecedence) return -1;
+            return 0;
         }
+        return 0;
     }
     static canCombine(operator, node1, node2) {
         switch(operator) {
@@ -606,6 +616,9 @@ class Function extends Node {
         super();
         this.name = functionName;
         this.input = functionInput;
+        if(Node.isOperator(this.input)) {
+            this.input = this.input.simplify();
+        }
         this.coefficient = coefficient;
         this.exponent = exponent;
     }
@@ -613,7 +626,7 @@ class Function extends Node {
         return false; //placeholder
     }
     isOne() {
-        return this.exponent.isZero();
+        return this.exponent.isZero() && this.coefficient.isOne();
     }
     isConstant() {
         return this.input.isConstant();
@@ -780,6 +793,7 @@ class Function extends Node {
 
     multiply(node) {
         if (!node) return this;
+        if(this.exponent.isZero()) return node.multiply(this.coefficient);
         switch (node.type) {
             case "constant":
                 return new Function(
@@ -799,6 +813,13 @@ class Function extends Node {
                     );
                 }
                 return new Operator("*", this, node);
+            case "variable":
+                return new Function(
+                    this.name,
+                    this.input,
+                    node.multiply(this.coefficient),
+                    this.exponent,
+                );
             default:
                 return new Operator("*", this, node);
         }
@@ -807,6 +828,7 @@ class Function extends Node {
     divide(node) {
         if (!node) return this;
         if (node.isZero()) throw new Error("Division by zero");
+        if(this.exponent.isZero()) return this.coefficient.divide(node);
         switch (node.type) {
             case "constant":
                 return new Function(
@@ -833,6 +855,7 @@ class Function extends Node {
 
     power(node) {
         if (!node) return this;
+        if(this.exponent.isZero()) return Constant.ONE;
         switch (node.type) {
             case "constant":
                 return new Function(
