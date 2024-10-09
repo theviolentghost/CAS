@@ -410,8 +410,8 @@ class Tree {
         return node;
     }
 
-    simplify(root = this.root) {
-        const reducedRoot = this.reduce(root, false);
+    simplify(root = this.root, allowDistribute = false) {
+        const reducedRoot = this.reduce(root, allowDistribute);
         //console.log(reducedRoot);
 
         const crawler = new Crawler(reducedRoot);
@@ -427,9 +427,8 @@ class Tree {
         };
     }
 
-    distribute() {
-        
-        return this;
+    distribute(root = this.root) {
+        return this.simplify(root, true);
     }
 
     derivative() {
@@ -656,7 +655,11 @@ class Expression {
     }
     simplify() {
         if (!this.isValid) return;
-        this.tree.simplify();
+        return this.tree.simplify();
+    }
+    distribute() {
+        if(!this.isValid) return;
+        return this.tree.distribute();
     }
     derivative() {
         if (!this.isValid) return;

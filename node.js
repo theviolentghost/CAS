@@ -116,6 +116,9 @@ class Constant extends Node {
     isConstant() {
         return true;
     }
+    negative() {
+        return this.multiply(Constant.NEGATIVE);
+    }
     derivative() {
         return Constant.ZERO;
     }
@@ -160,7 +163,7 @@ class Constant extends Node {
                 return new Constant(node.value * this.value);
             case "variable":
             case "function":
-                return node.coefficient.multiply(this);
+                return node.multiply(this);
             case "operator":
                 node.left.multiply(this);
                 node.right.multiply(this);
@@ -198,7 +201,7 @@ class Constant extends Node {
     }
     toString() {
         if(Number.isInteger(this.value)) return `${this.value}`;
-        return this.value;
+        return this.fraction().display;
     }
 }
 
@@ -227,6 +230,9 @@ class Variable extends Node {
     }
     isConstant() {
         return this.coefficient.isZero() || this.exponent.isZero();
+    }
+    negative() {
+        return this.multiply(Constant.NEGATIVE);
     }
     derivative() {
         if(this.isPolynomial()) return this.polynomialDerivative();
@@ -383,6 +389,14 @@ class Operator extends Node {
         if(this._left) this._left.parent = this;
         if(this._right) this._right.parent = this;
 
+        //fix parent issue
+
+        if(this.operator === "-") {
+            this.operator = "+";
+            this.name = "+";
+            this.right = this._right.negative();
+        }
+
         this.order();
     }
     isZero() {
@@ -393,6 +407,9 @@ class Operator extends Node {
     }
     isConstant() {
         return this.left.isConstant() && this.right.isConstant();
+    }
+    negative() {
+        return new Operator(this.operator, this.left.negative(), this.right.negative());
     }
     derivative() {
         switch(this.operator) {
@@ -460,15 +477,15 @@ class Operator extends Node {
 
     multiply(node) {
         if (!node) return this;
-        if (node.type === "constant") {
-            if (node.isZero()) return Constant.ZERO;
-            if (node.value === 1) return this;
-            return new Operator("*", 
-                new Operator(this.operator, 
+        if(node.isZero()) return Constant.ZERO;
+        if(node.isOne()) return this;
+
+        switch (node.type) {
+            default:
+                return new Operator(this.operator,
                     this.left.multiply(node),
                     this.right.multiply(node)
-                )
-            );
+                );
         }
         return new Operator("*", this, node);
     }
@@ -515,7 +532,7 @@ class Operator extends Node {
         "function": 3,
         "operator": 4
     }
-    static nonOrderableOperators = ["/", "^"];
+    static nonOrderableOperators = ["/", "^", "-"];
     preventOrder() {
         return Operator.nonOrderableOperators.includes(this.operator);
     }
@@ -630,6 +647,9 @@ class Function extends Node {
     }
     isConstant() {
         return this.input.isConstant();
+    }
+    negative() {
+        return this.multiply(Constant.NEGATIVE);
     }
     derivative() {
         if(this.isConstant()) return Constant.ZERO;
